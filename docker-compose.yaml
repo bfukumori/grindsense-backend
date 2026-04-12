@@ -1,0 +1,203 @@
+services:
+  db:
+    image: postgres:17-alpine3.23
+    container_name: grindsense-db
+    restart: always
+    environment:
+      POSTGRES_USER: ${DB_USER}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      POSTGRES_DB: ${DB_NAME}
+    ports:
+      - '5432:5432'
+    volumes:
+      - grindsense-db:/var/lib/postgresql/data
+      - ./src/scripts/init-db.sql:/docker-entrypoint-initdb.d/init.sql
+    networks:
+      - grindsense-network
+
+  migrator:
+    image: oven/bun:1
+    container_name: grindsense-migrator
+    depends_on:
+      - db
+    volumes:
+      - ./src/db:/app/src/db
+      - ./drizzle:/app/drizzle
+      - ./drizzle.config.ts:/app/drizzle.config.ts
+      - ./package.json:/app/package.json
+    working_dir: /app
+    environment:
+      - DATABASE_URL=postgresql://${DB_USER}:${DB_PASSWORD}@db:5432/${DB_NAME}
+    command: /bin/sh -c "bun install drizzle-orm drizzle-kit pg && bunx drizzle-kit push --force"
+    networks:
+      - grindsense-network
+
+  redis:
+    image: redis:latest
+    container_name: grindsense-redis
+    restart: always
+    ports:
+      - '6379:6379'
+    volumes:
+      - redis-data:/data
+    command: redis-server --appendonly yes
+    networks:
+      - grindsense-network
+
+  grindsense-api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: grindsense-api
+    labels:
+      - 'logging=promtail'
+      - 'logging_app=grindsense-api'
+    restart: unless-stopped
+    depends_on:
+      pgbouncer:
+        condition: service_started
+      redis:
+        condition: service_started
+      migrator:
+        condition: service_completed_successfully
+    ports:
+      - '${PORT}:${PORT}'
+    env_file:
+      - .env
+    environment:
+      - DATABASE_URL=postgresql://${DB_USER}:${DB_PASSWORD}@pgbouncer:5432/${DB_NAME}
+      - REDIS_URL=redis://redis:6379
+      - OTEL_SERVICE_NAME=grindsense-api
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://tempo:4318/v1/traces
+      - OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf
+    networks:
+      - grindsense-network
+
+  grindsense-iot-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: grindsense-iot-worker
+    labels:
+      - 'logging=promtail'
+      - 'logging_app=grindsense-worker'
+    restart: unless-stopped
+    depends_on:
+      pgbouncer:
+        condition: service_started
+      redis:
+        condition: service_started
+      migrator:
+        condition: service_completed_successfully
+    env_file:
+      - .env
+    environment:
+      - DATABASE_URL=postgresql://${DB_USER}:${DB_PASSWORD}@pgbouncer:5432/${DB_NAME}
+      - REDIS_URL=redis://redis:6379
+      - OTEL_SERVICE_NAME=grindsense-iot-worker
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://tempo:4318/v1/traces
+      - OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf
+    command: ['./worker']
+    networks:
+      - grindsense-network
+
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yaml'
+      - '--web.enable-remote-write-receiver'
+    volumes:
+      - ./src/monitoring/prometheus.yaml:/etc/prometheus/prometheus.yaml
+    ports:
+      - '9090:9090'
+    privileged: true
+    networks:
+      - grindsense-network
+
+  tempo:
+    image: grafana/tempo:2.3.1
+    container_name: tempo
+    command: ['-config.file=/etc/tempo.yaml']
+    volumes:
+      - ./src/monitoring/tempo.yaml:/etc/tempo.yaml
+    ports:
+      - '3200:3200' # Porta de consulta do Grafana
+      - '4317:4317' # Recebedor OTLP gRPC
+      - '4318:4318' # Recebedor OTLP HTTP
+    networks:
+      - grindsense-network
+
+  loki:
+    image: grafana/loki:latest
+    container_name: loki
+    ports:
+      - '3100:3100'
+    command: -config.file=/etc/loki/local-config.yaml
+    networks:
+      - grindsense-network
+
+  promtail:
+    image: grafana/promtail:latest
+    container_name: promtail
+    volumes:
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./src/monitoring/promtail-config.yaml:/etc/promtail/promtail-config.yaml
+    command: -config.file=/etc/promtail/promtail-config.yaml
+    depends_on:
+      - loki
+    networks:
+      - grindsense-network
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: grafana
+    user: '0'
+    ports:
+      - '3001:3000'
+    environment:
+      - GF_LIVE_MAX_CONNECTIONS=0
+      - GF_AUTH_ANONYMOUS_ENABLED=true
+      - GF_AUTH_ANONYMOUS_ORG_ROLE=Admin
+    volumes:
+      - 'grafana-data:/var/lib/grafana'
+      - ./src/monitoring/grafana/datasources:/etc/grafana/provisioning/datasources
+      - ./src/monitoring/grafana/dashboards:/etc/grafana/provisioning/dashboards
+
+    depends_on:
+      prometheus:
+        condition: service_started
+      loki:
+        condition: service_started
+      tempo:
+        condition: service_started
+    networks:
+      - grindsense-network
+
+  pgbouncer:
+    image: edoburu/pgbouncer:latest
+    environment:
+      - DB_HOST=db
+      - DB_USER=${DB_USER}
+      - DB_PASSWORD=${DB_PASSWORD}
+      - POOL_MODE=transaction
+      - MAX_CLIENT_CONN=1000
+      - DEFAULT_POOL_SIZE=40
+      - AUTH_TYPE=scram-sha-256
+      - IGNORE_STARTUP_PARAMETERS=extra_float_digits,statement_timeout
+    ports:
+      - '6432:5432'
+    depends_on:
+      - db
+    networks:
+      - grindsense-network
+
+volumes:
+  grindsense-db:
+  grafana-data:
+  redis-data:
+
+networks:
+  grindsense-network:
+    driver: bridge

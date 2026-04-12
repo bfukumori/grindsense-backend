@@ -1,0 +1,27 @@
+preload = ["./src/plugins/instrumentation.plugin.ts"]
+
+[test]
+coverageReporter = ["text", "lcov"]
+coverageDir = "./coverage"
+coverageSkipTestFiles = true
+coverageThreshold = 0.95
+
+pathIgnorePatterns = [
+  "src/db/**",
+  "src/config/**",
+  "src/lib/**",
+  "src/plugins/**",
+  "src/scripts/**",
+  "*.config.js"
+]
+
+coveragePathIgnorePatterns = [
+  "src/db/**",
+  "src/config/**",
+  "src/lib/**",
+  "src/plugins/**",
+  "src/scripts/**",
+  "**/*.spec.ts",
+  "**/*.test.ts",
+  "*.config.js"
+]

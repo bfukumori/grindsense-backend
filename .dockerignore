@@ -1,0 +1,54 @@
+# Dependências e Runtime
+node_modules/
+bun.lockb
+.bun/
+
+# Builds e Output
+dist/
+build/
+out/
+
+# Logs e Debug
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+
+# Variáveis de Ambiente e Segredos
+.env
+.env.*
+!.env.example
+.secrets/
+
+# Docker e Infra
+Docker/
+docker-compose*.yml
+.dockerignore
+Dockerfile
+
+# Testes e Cobertura
+tests/
+coverage/
+.nyc_output/
+*.spec.ts
+*.test.ts
+
+# Cache e IDEs
+.git/
+.gitignore
+.editorconfig
+.vscode/
+.idea/
+.DS_Store
+*.swp
+
+# Banco de Dados Local (Desenvolvimento)
+drizzle/
+*.sqlite
+*.db
+*.db-journal
+
+# Temporários
+tmp/
+.cache/
