@@ -2,22 +2,28 @@
 import type { ValidationError } from 'elysia';
 
 export const formatElysiaValidationError = (error: ValidationError) => {
-  if (!error.all) return { message: error.message || 'Unknown validation error' };
+  if (!error.all)
+    return { message: error.message || 'Unknown validation error' };
 
-  const issues = error.all.map((err) => {
+  const issues = error.all.map((err: any) => {
     const path = err.path.substring(1) || 'body';
-    let message = err.message;
+
+    let message = err.schema.error || err.message;
     let expected = null;
 
-    if (err.schema.anyOf) {
-      expected = err.schema.anyOf.map((s: any) => s.const || s.type).filter(Boolean);
-      message = `Invalid value. Expected one of: ${expected.join(', ')}`;
-    } else if (err.message === 'Expected object' && err.path === '') {
-      const requiredFields = err.schema?.required || [];
-      message = `Request body is missing or empty. Expected an object with: ${requiredFields.join(', ')}`;
-      expected = err.schema?.properties;
-    } else if (err.type === 45 || err.message.includes('Required')) {
-      message = `Property '${path}' is required but missing.`;
+    if (!err.schema.error) {
+      if (err.schema.anyOf) {
+        expected = err.schema.anyOf
+          .map((s: any) => s.const || s.type)
+          .filter(Boolean);
+        message = `Invalid value. Expected one of: ${expected.join(', ')}`;
+      } else if (err.message === 'Expected object' && err.path === '') {
+        const requiredFields = err.schema?.required || [];
+        message = `Request body is missing or empty. Expected an object with: ${requiredFields.join(', ')}`;
+        expected = err.schema?.properties;
+      } else if (err.type === 45 || err.message.includes('Required')) {
+        message = `Property '${path}' is required but missing.`;
+      }
     }
 
     return {

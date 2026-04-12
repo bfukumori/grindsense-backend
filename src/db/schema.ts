@@ -5,6 +5,7 @@ import {
   integer,
   pgEnum,
   pgTable,
+  real,
   text,
   timestamp,
   uniqueIndex,
@@ -15,7 +16,11 @@ import { temporalInstant, temporalPlainDate } from './temporal-types';
 // ==========================================
 // DOMÍNIO: CORE & AUTH
 // ==========================================
-export const themePreferenceEnum = pgEnum('theme_preference', ['DARK', 'LIGHT', 'SYSTEM']);
+export const themePreferenceEnum = pgEnum('theme_preference', [
+  'DARK',
+  'LIGHT',
+  'SYSTEM',
+]);
 export type ThemePreference = (typeof themePreferenceEnum.enumValues)[number];
 
 export const users = pgTable(
@@ -93,8 +98,17 @@ export const verifications = pgTable('verifications', {
 // ==========================================
 // DOMÍNIO: GAMIFICAÇÃO & TAREFAS
 // ==========================================
-export const taskCategoryEnum = pgEnum('task_category', ['STUDY', 'WORK', 'HEALTH', 'REST']);
-export const taskDifficultyEnum = pgEnum('task_difficulty', ['EASY', 'MEDIUM', 'HARD']);
+export const taskCategoryEnum = pgEnum('task_category', [
+  'STUDY',
+  'WORK',
+  'HEALTH',
+  'REST',
+]);
+export const taskDifficultyEnum = pgEnum('task_difficulty', [
+  'EASY',
+  'MEDIUM',
+  'HARD',
+]);
 export type TaskCategory = (typeof taskCategoryEnum.enumValues)[number];
 export type TaskDifficulty = (typeof taskDifficultyEnum.enumValues)[number];
 
@@ -126,8 +140,17 @@ export const tasks = pgTable(
 // ==========================================
 // DOMÍNIO: BIOMETRIA & PRONTIDÃO
 // ==========================================
-export const moodEnum = pgEnum('mood', ['EXCITED', 'NEUTRAL', 'TIRED', 'STRESSED']);
-export const readinessModeEnum = pgEnum('readiness_mode', ['HIGH_FOCUS', 'LIGHT', 'RECOVERY']);
+export const moodEnum = pgEnum('mood', [
+  'EXCITED',
+  'NEUTRAL',
+  'TIRED',
+  'STRESSED',
+]);
+export const readinessModeEnum = pgEnum('readiness_mode', [
+  'HIGH_FOCUS',
+  'LIGHT',
+  'RECOVERY',
+]);
 export type ReadinessMode = (typeof readinessModeEnum.enumValues)[number];
 export type Mood = (typeof moodEnum.enumValues)[number];
 
@@ -142,8 +165,8 @@ export const dailyCheckins = pgTable(
       .references(() => users.id, { onDelete: 'cascade' }),
     dateString: text().notNull(), // YYYY-MM-DD
     mood: moodEnum().notNull(),
-    subjectiveSleepQuality: integer().notNull(),
-    availableHours: integer().notNull(),
+    subjectiveSleepQuality: real().notNull(),
+    availableHours: real().notNull(),
     readinessScore: integer(),
     readinessMode: readinessModeEnum(),
     aiSummary: text(),
@@ -203,7 +226,11 @@ export const heartRateLogs = pgTable(
 // ==========================================
 // DOMÍNIO: INFRAESTRUTURA IoT (Station/Wearable)
 // ==========================================
-export const deviceStatusEnum = pgEnum('device_status', ['PROVISIONED', 'ACTIVE', 'REVOKED']);
+export const deviceStatusEnum = pgEnum('device_status', [
+  'PROVISIONED',
+  'ACTIVE',
+  'REVOKED',
+]);
 export type DeviceStatus = (typeof deviceStatusEnum.enumValues)[number];
 
 export const iotDevices = pgTable(

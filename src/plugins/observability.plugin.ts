@@ -8,7 +8,7 @@ import { AppError } from '@/utils/app-error';
 import { formatElysiaValidationError } from '@/utils/format-elysia-validation-error';
 import { metrics } from './metrics.plugin';
 
-const excludePaths = ['/metrics', '/health', '/swagger', '/open-api'];
+const excludePaths = ['/metrics', '/health', '/docs'];
 
 export const observabilityPlugin = (app: Elysia) =>
   app
@@ -16,31 +16,36 @@ export const observabilityPlugin = (app: Elysia) =>
     .use(metrics)
     .onError(({ request, error, code, path, set }) => {
       if (excludePaths.some((p) => path.startsWith(p))) return;
+      console.log(error);
 
       if (error instanceof AppError) {
+        set.status = error.statusCode;
+
         return {
-          error: InvertedStatusMap[error.statusCode as keyof typeof InvertedStatusMap],
+          error:
+            InvertedStatusMap[
+              error.statusCode as keyof typeof InvertedStatusMap
+            ] || 'UNKNOWN_ERROR',
           message: error.message,
         };
       }
 
       if (code === 'VALIDATION' && error instanceof ValidationError) {
         set.status = 400;
-        const friendlyError = formatElysiaValidationError(error);
-        return friendlyError;
+        return formatElysiaValidationError(error);
       }
 
       if (code === 'NOT_FOUND') {
         set.status = 404;
         return {
-          error: 'Not found route',
-          message: `The requested route (${path}) does not exist or a parameter (such as an ID) is missing.`,
+          error: 'NOT_FOUND',
+          message: `The requested route (${path}) does not exist.`,
         };
       }
 
       const isAppError = error instanceof AppError;
       const statusCode = isAppError ? error.statusCode : 500;
-      const message = isAppError ? error.message : 'Erro interno no servidor';
+      const message = isAppError ? error.message : 'Unknown server error.';
       const activeSpan = trace.getActiveSpan();
 
       console.error(

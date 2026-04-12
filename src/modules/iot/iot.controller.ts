@@ -39,12 +39,21 @@ export const iotController = new Elysia({ name: 'controller:iot' })
       },
     },
     (app) =>
-      app.use(iotAuthPlugin).post('/telemetry', async ({ headers, body, set }) => {
-        const deviceId = headers['x-device-id'];
+      app
+        .use(iotAuthPlugin)
+        .post('/telemetry', async ({ headers, body, set }) => {
+          const deviceId = headers['x-device-id'];
 
-        await redis.xadd(STREAM_KEY, '*', 'deviceId', deviceId, 'payload', JSON.stringify(body));
+          await redis.xadd(
+            STREAM_KEY,
+            '*',
+            'deviceId',
+            deviceId,
+            'payload',
+            JSON.stringify(body),
+          );
 
-        set.status = 202;
-        return { success: true };
-      }),
+          set.status = 202;
+          return { success: true };
+        }),
   );

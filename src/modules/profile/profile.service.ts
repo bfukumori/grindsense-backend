@@ -5,7 +5,7 @@ import { hourlyHealthMetrics, type ThemePreference, users } from '@/db/schema';
 import { AppError } from '@/utils/app-error';
 
 const LEADERBOARD_CACHE_KEY = 'leaderboard:top10';
-const CACHE_TTL_SECONDS = 300;
+const CACHE_TTL_SECONDS = 60;
 
 export class ProfileService {
   constructor(private readonly db: Database) {}
@@ -22,10 +22,15 @@ export class ProfileService {
       throw new AppError(400, 'Nenhum dado fornecido para atualização.');
     }
 
-    const [user] = await this.db.update(users).set(data).where(eq(users.id, userId)).returning({
-      themePreference: users.themePreference,
-      isPrivateProfile: users.isPrivateProfile,
-    });
+    const [user] = await this.db
+      .update(users)
+      .set(data)
+      .where(eq(users.id, userId))
+      .returning({
+        themePreference: users.themePreference,
+        pushNotifications: users.pushNotifications,
+        isPrivateProfile: users.isPrivateProfile,
+      });
 
     if (!user) throw new AppError(404, 'Usuário não encontrado.');
     return user;
@@ -63,7 +68,12 @@ export class ProfileService {
         totalXp: u.totalXp,
       }));
 
-      await redis.set(LEADERBOARD_CACHE_KEY, JSON.stringify(result), 'EX', CACHE_TTL_SECONDS);
+      await redis.set(
+        LEADERBOARD_CACHE_KEY,
+        JSON.stringify(result),
+        'EX',
+        CACHE_TTL_SECONDS,
+      );
       return result;
     } catch (e) {
       console.log(e);
