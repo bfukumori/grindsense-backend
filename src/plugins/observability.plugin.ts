@@ -23,9 +23,8 @@ export const observabilityPlugin = (app: Elysia) =>
 
         return {
           error:
-            InvertedStatusMap[
-              error.statusCode as keyof typeof InvertedStatusMap
-            ] || 'UNKNOWN_ERROR',
+            InvertedStatusMap[error.statusCode as keyof typeof InvertedStatusMap] ||
+            'UNKNOWN_ERROR',
           message: error.message,
         };
       }

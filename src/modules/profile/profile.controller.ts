@@ -20,6 +20,7 @@ export const profileController = new Elysia({ name: 'controller:profile' })
       },
       detail: {
         summary: 'Obter Ranking de Usuários',
+        description: 'Retorna os 10 usuários com mais XP, excluindo perfis privados.',
       },
     },
   )
@@ -38,7 +39,11 @@ export const profileController = new Elysia({ name: 'controller:profile' })
             404: 'Shared.ErrorResponse',
             500: 'Shared.ErrorResponse',
           },
-          detail: { summary: 'Atualizar Configurações do Perfil' },
+          detail: {
+            summary: 'Atualizar Configurações do Perfil',
+            description:
+              'Permite ao usuário atualizar suas preferências de tema, notificações e visibilidade do perfil.',
+          },
         },
       )
       .get(
@@ -57,7 +62,53 @@ export const profileController = new Elysia({ name: 'controller:profile' })
             200: 'Profile.StatsResponse',
             500: 'Shared.ErrorResponse',
           },
-          detail: { summary: 'Obter Tendências de Saúde (Analytics)' },
+          detail: {
+            summary: 'Obter Tendências de Saúde (Analytics)',
+            description: 'Retorna os dados de saúde agregados por hora para análise.',
+          },
+        },
+      )
+      .patch(
+        '/onboarding',
+        async ({ body, user, profileService }) => {
+          const result = await profileService.completeOnboarding(user.id, body);
+
+          return {
+            message: 'Onboarding concluído com sucesso.',
+            ...result,
+          };
+        },
+        {
+          body: 'Profile.OnboardingBody',
+          response: {
+            200: 'Profile.OnboardingResponse',
+            400: 'Shared.ErrorResponse',
+            404: 'Shared.ErrorResponse',
+            500: 'Shared.ErrorResponse',
+          },
+          detail: {
+            summary: 'Finalizar Onboarding (Compliance & Initial XP)',
+            description:
+              'Completa o processo de onboarding, calculando a idade do usuário para compliance LGPD e concedendo XP inicial.',
+          },
+        },
+      )
+      .get(
+        '/',
+        async ({ user, profileService }) => {
+          return await profileService.getMyProfile(user.id);
+        },
+        {
+          response: {
+            200: 'Profile.MeResponse',
+            401: 'Shared.ErrorResponse',
+            404: 'Shared.ErrorResponse',
+            500: 'Shared.ErrorResponse',
+          },
+          detail: {
+            summary: 'Obter Perfil do Usuário Logado (Hydration)',
+            description: 'Retorna os dados do perfil do usuário autenticado.',
+          },
         },
       ),
   );

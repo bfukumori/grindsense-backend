@@ -2,8 +2,7 @@
 import type { ValidationError } from 'elysia';
 
 export const formatElysiaValidationError = (error: ValidationError) => {
-  if (!error.all)
-    return { message: error.message || 'Unknown validation error' };
+  if (!error.all) return { message: error.message || 'Unknown validation error' };
 
   const issues = error.all.map((err: any) => {
     const path = err.path.substring(1) || 'body';
@@ -13,9 +12,7 @@ export const formatElysiaValidationError = (error: ValidationError) => {
 
     if (!err.schema.error) {
       if (err.schema.anyOf) {
-        expected = err.schema.anyOf
-          .map((s: any) => s.const || s.type)
-          .filter(Boolean);
+        expected = err.schema.anyOf.map((s: any) => s.const || s.type).filter(Boolean);
         message = `Invalid value. Expected one of: ${expected.join(', ')}`;
       } else if (err.message === 'Expected object' && err.path === '') {
         const requiredFields = err.schema?.required || [];

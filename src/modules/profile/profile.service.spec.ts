@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, mock } from 'bun:test';
 import { Temporal } from '@js-temporal/polyfill';
 import { eq } from 'drizzle-orm';
 import { db } from '@/db';
-import { hourlyHealthMetrics, users } from '@/db/schema';
+import { hourlyHealthMetrics, tasks, users } from '@/db/schema';
 import { seedTestUser, truncateDb } from '@/tests/db-setup';
 import { AppError } from '@/utils/app-error';
 
@@ -18,7 +18,7 @@ mock.module('@/db/redis', () => ({
 }));
 
 import { redis } from '@/db/redis';
-import { ProfileService } from './profile.service';
+import { CACHE_TTL_SECONDS, ProfileService } from './profile.service';
 
 describe('ProfileService (Integration)', () => {
   let service: ProfileService;
@@ -123,7 +123,7 @@ describe('ProfileService (Integration)', () => {
         'leaderboard:top10',
         JSON.stringify(leaderboard),
         'EX',
-        300,
+        CACHE_TTL_SECONDS,
       );
     });
 
@@ -135,6 +135,22 @@ describe('ProfileService (Integration)', () => {
 
       expect(leaderboard).toEqual(cachedData);
       expect(mockRedisSet).not.toHaveBeenCalled();
+    });
+
+    it('it should wait and return cached data if another process holds the lock (Retry Mechanism)', async () => {
+      const cachedData = [{ rank: 1, userId: 'user-lock', name: 'Lock Winner', totalXp: 1000 }];
+
+      mockRedisGet.mockResolvedValueOnce(null).mockResolvedValueOnce(JSON.stringify(cachedData));
+
+      mockRedisSet.mockImplementation((_: string, ...args: unknown[]) => {
+        if (args.includes('NX')) return Promise.resolve(null);
+        return Promise.resolve('OK');
+      });
+
+      const leaderboard = await service.getLeaderboard();
+
+      expect(leaderboard).toEqual(cachedData);
+      expect(mockRedisGet).toHaveBeenCalledTimes(2);
     });
   });
 
@@ -165,6 +181,95 @@ describe('ProfileService (Integration)', () => {
       expect(latestHour?.avgBpm).toBe(90);
       expect(latestHour?.avgSpo2).toBe(98);
       expect(latestHour?.hour).toBeDefined();
+    });
+  });
+
+  describe('completeOnboarding', () => {
+    it('it should complete onboarding for an adult (>= 16), activate account, and inject initial tasks', async () => {
+      const payload = {
+        name: 'John Adult',
+        birthDate: '1990-05-15',
+        studyStyle: 'EARLY_BIRD' as const,
+      };
+
+      const result = await service.completeOnboarding(testUserId, payload);
+
+      expect(result.accountStatus).toBe('ACTIVE');
+      expect(result.isMinor).toBe(false);
+      expect(result.totalXp).toBe(10);
+
+      const [dbUser] = await db.select().from(users).where(eq(users.id, testUserId));
+      expect(dbUser?.name).toBe('John Adult');
+      expect(dbUser?.accountStatus).toBe('ACTIVE');
+      expect(dbUser?.guardianEmail).toBeNull();
+
+      const userTasks = await db.select().from(tasks).where(eq(tasks.userId, testUserId));
+      expect(userTasks.length).toBe(2);
+      expect(userTasks[0]?.title).toBe('Fazer o primeiro check-in');
+    });
+
+    it('it should require guardianEmail and set status to PENDING_GUARDIAN_CONSENT for minors (< 16)', async () => {
+      const payload = {
+        name: 'Timmy Minor',
+        birthDate: '2015-10-10',
+        studyStyle: 'NIGHT_OWL' as const,
+        guardianEmail: 'parent@domain.com',
+      };
+
+      const result = await service.completeOnboarding(testUserId, payload);
+
+      expect(result.accountStatus).toBe('PENDING_GUARDIAN_CONSENT');
+      expect(result.isMinor).toBe(true);
+
+      const [dbUser] = await db.select().from(users).where(eq(users.id, testUserId));
+      expect(dbUser?.accountStatus).toBe('PENDING_GUARDIAN_CONSENT');
+      expect(dbUser?.guardianEmail).toBe('parent@domain.com');
+    });
+
+    it('it should throw AppError 400 (Fail-fast) if user is minor and no guardianEmail is provided', async () => {
+      const payload = {
+        name: 'Timmy Minor',
+        birthDate: '2015-10-10',
+        studyStyle: 'IRREGULAR' as const,
+      };
+
+      expect(service.completeOnboarding(testUserId, payload)).rejects.toThrow(
+        new AppError(400, 'E-mail do responsável é obrigatório para menores de 16 anos.'),
+      );
+
+      const userTasks = await db.select().from(tasks).where(eq(tasks.userId, testUserId));
+      expect(userTasks.length).toBe(0);
+    });
+
+    it('it should throw AppError 404 if the user does not exist', async () => {
+      const payload = {
+        name: 'Ghost User',
+        birthDate: '1990-01-01',
+        studyStyle: 'EARLY_BIRD' as const,
+      };
+
+      expect(service.completeOnboarding('invalid-id', payload)).rejects.toThrow(
+        new AppError(404, 'Usuário não encontrado.'),
+      );
+    });
+  });
+
+  describe('getMyProfile', () => {
+    it('it should return the user profile data mapped correctly with ISO dates', async () => {
+      const profile = await service.getMyProfile(testUserId);
+
+      expect(profile.id).toBe(testUserId);
+      expect(profile.totalXp).toBe(0);
+      expect(profile.themePreference).toBe('DARK');
+
+      expect(typeof profile.createdAt).toBe('string');
+      expect(profile.createdAt).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/);
+    });
+
+    it('it should throw AppError 404 if the user does not exist', async () => {
+      expect(service.getMyProfile('ghost-user-id')).rejects.toThrow(
+        new AppError(404, 'Usuário não encontrado.'),
+      );
     });
   });
 });

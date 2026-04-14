@@ -3,12 +3,12 @@ import { eq } from 'drizzle-orm';
 import { db } from '@/db';
 import { heartRateLogs, iotDevices } from '@/db/schema';
 import { seedTestUser, truncateDb } from '@/tests/db-setup';
+import { AppError } from '@/utils/app-error';
 import { IotService, type TelemetryEvent } from './iot.service';
 
-// 1. Definição do Mock de Pipeline (Chainable API Segura)
 const mockPipelineGet = mock();
 const mockPipelineSet = mock();
-const mockPipelineExec = mock().mockResolvedValue([]); // Simula Cache Miss em todos os testes
+const mockPipelineExec = mock().mockResolvedValue([]);
 
 const mockPipeline = {
   get: mockPipelineGet,
@@ -16,7 +16,6 @@ const mockPipeline = {
   exec: mockPipelineExec,
 };
 
-// Faz com que os métodos retornem o próprio objeto para permitir: pipeline.get().set().exec()
 mockPipelineGet.mockReturnValue(mockPipeline);
 mockPipelineSet.mockReturnValue(mockPipeline);
 
@@ -36,7 +35,6 @@ describe('IotService (Integration) - Micro-batching', () => {
     await truncateDb();
     await seedTestUser(testUserId);
 
-    // 2. Prevenção de Leak: Limpa as chamadas do mock antes de cada teste
     mockPipelineGet.mockClear();
     mockPipelineSet.mockClear();
     mockPipelineExec.mockClear();
@@ -82,21 +80,18 @@ describe('IotService (Integration) - Micro-batching', () => {
         messageId: '3-0',
         deviceId: deviceId1,
         payload: { bpm: 60, timestamp },
-      }, // Duplicata intencional
+      },
     ];
 
     await service.processBatch(events);
 
-    // Assert: Banco de Dados (Idempotência)
     const logs = await db.select().from(heartRateLogs).where(eq(heartRateLogs.userId, testUserId));
     expect(logs.length).toBe(2);
 
     const watchLog = logs.find((l) => l.deviceId === deviceId1);
     expect(watchLog?.bpm).toBe(60);
 
-    // 3. Assert: Infraestrutura (Redis Cache Hydration)
-    // Garante que o fallback populou o cache para evitar consultas repetidas no banco no próximo batch
-    expect(mockPipelineSet).toHaveBeenCalledTimes(2); // 1x para cada device único
+    expect(mockPipelineSet).toHaveBeenCalledTimes(2);
     expect(mockPipelineSet).toHaveBeenCalledWith(
       `device:user:${deviceId1}`,
       testUserId,
@@ -125,7 +120,53 @@ describe('IotService (Integration) - Micro-batching', () => {
     const logs = await db.select().from(heartRateLogs);
     expect(logs.length).toBe(0);
 
-    // Como o device não existe no DB, ele não deve tentar hidratar o cache com null/undefined
     expect(mockPipelineSet).not.toHaveBeenCalled();
+  });
+});
+
+describe('IotService (Integration) - Claim Device', () => {
+  let service: IotService;
+  const testUserId = 'user-claim-test';
+
+  beforeEach(async () => {
+    await truncateDb();
+    await seedTestUser(testUserId);
+    service = new IotService(db);
+  });
+
+  it('it should successfully claim a provisioned device and set its status to ACTIVE', async () => {
+    const claimMacAddress = '11:22:33:44:55:66';
+
+    await db.insert(iotDevices).values({
+      id: 'unclaimed-device-1',
+      userId: testUserId,
+      name: 'Smart Ring Tracker',
+      status: 'PROVISIONED',
+      secret: 'provision-secret',
+      deviceType: 'WEARABLE',
+      macAddress: claimMacAddress,
+    });
+
+    const result = await service.claimDevice(testUserId, claimMacAddress);
+
+    expect(result.id).toBe('unclaimed-device-1');
+    expect(result.name).toBe('Smart Ring Tracker');
+    expect(result.status).toBe('ACTIVE');
+
+    const [dbDevice] = await db
+      .select()
+      .from(iotDevices)
+      .where(eq(iotDevices.macAddress, claimMacAddress));
+
+    expect(dbDevice?.userId).toBe(testUserId);
+    expect(dbDevice?.status).toBe('ACTIVE');
+  });
+
+  it('it should throw AppError 404 (Fail-fast) if the MAC address does not exist', async () => {
+    const fakeMacAddress = 'FF:FF:FF:FF:FF:FF';
+
+    expect(service.claimDevice(testUserId, fakeMacAddress)).rejects.toThrow(
+      new AppError(404, 'Dispositivo não encontrado ou não fabricado.'),
+    );
   });
 });

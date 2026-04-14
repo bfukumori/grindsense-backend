@@ -1,5 +1,5 @@
 /** biome-ignore-all lint/style/noNonNullAssertion: <tests> */
-import { beforeEach, describe, expect, it } from 'bun:test';
+import { beforeEach, describe, expect, it, spyOn } from 'bun:test';
 import { Temporal } from '@js-temporal/polyfill';
 import { and, eq } from 'drizzle-orm';
 import { db } from '@/db';
@@ -16,7 +16,9 @@ describe('Health Aggregator Worker (Integration)', () => {
   });
 
   it('should group multiple raw logs from the same hour into a single bucket', async () => {
-    const baseTime = Temporal.Now.instant().subtract({ minutes: 30 });
+    const currentZDT = Temporal.Now.zonedDateTimeISO('UTC');
+    const baseTime = currentZDT.with({ minute: 30, second: 0, millisecond: 0 }).toInstant();
+
     const hourStart = `${baseTime.toString().split(':')[0]}:00:00Z`;
     const expectedBucket = Temporal.Instant.from(hourStart);
 
@@ -27,7 +29,12 @@ describe('Health Aggregator Worker (Integration)', () => {
         spo2: 98,
         measuredAt: baseTime.subtract({ minutes: 5 }),
       },
-      { userId: testUserId, bpm: 80, spo2: 96, measuredAt: baseTime },
+      {
+        userId: testUserId,
+        bpm: 80,
+        spo2: 96,
+        measuredAt: baseTime,
+      },
       {
         userId: testUserId,
         bpm: 100,
@@ -54,7 +61,8 @@ describe('Health Aggregator Worker (Integration)', () => {
   });
 
   it('should update the existing bucket (Upsert) when new logs arrive for the same hour', async () => {
-    const baseTime = Temporal.Now.instant().subtract({ minutes: 10 });
+    const currentZDT = Temporal.Now.zonedDateTimeISO('UTC');
+    const baseTime = currentZDT.with({ minute: 30, second: 0, millisecond: 0 }).toInstant();
 
     await db.insert(heartRateLogs).values({
       userId: testUserId,
@@ -91,5 +99,25 @@ describe('Health Aggregator Worker (Integration)', () => {
 
     const metrics = await db.select().from(hourlyHealthMetrics);
     expect(metrics.length).toBe(0);
+  });
+
+  it('should catch errors, log them, and not break the application', async () => {
+    const dbSpy = spyOn(db, 'select').mockImplementationOnce(() => {
+      throw new Error('Database Crash Simulation');
+    });
+
+    const consoleSpy = spyOn(console, 'error').mockImplementationOnce(() => {});
+
+    try {
+      await aggregateHealthMetrics();
+
+      expect(consoleSpy).toHaveBeenCalledWith(
+        '❌ Falha na execução do Cron de Saúde:',
+        expect.any(Error),
+      );
+    } finally {
+      dbSpy.mockRestore();
+      consoleSpy.mockRestore();
+    }
   });
 });

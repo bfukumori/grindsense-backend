@@ -1,4 +1,5 @@
 import { Temporal } from '@js-temporal/polyfill';
+import { sql } from 'drizzle-orm';
 import {
   boolean,
   index,
@@ -16,12 +17,17 @@ import { temporalInstant, temporalPlainDate } from './temporal-types';
 // ==========================================
 // DOMÍNIO: CORE & AUTH
 // ==========================================
-export const themePreferenceEnum = pgEnum('theme_preference', [
-  'DARK',
-  'LIGHT',
-  'SYSTEM',
+export const themePreferenceEnum = pgEnum('theme_preference', ['DARK', 'LIGHT', 'SYSTEM']);
+export const studyStyleEnum = pgEnum('study_style', ['EARLY_BIRD', 'NIGHT_OWL', 'IRREGULAR']);
+export const accountStatusEnum = pgEnum('account_status', [
+  'ONBOARDING_INCOMPLETE',
+  'PENDING_GUARDIAN_CONSENT',
+  'ACTIVE',
+  'SUSPENDED',
 ]);
 export type ThemePreference = (typeof themePreferenceEnum.enumValues)[number];
+export type StudyStyle = (typeof studyStyleEnum.enumValues)[number];
+export type AccountStatus = (typeof accountStatusEnum.enumValues)[number];
 
 export const users = pgTable(
   'users',
@@ -33,6 +39,10 @@ export const users = pgTable(
     email: text().notNull().unique(),
     emailVerified: boolean().notNull().default(false),
     image: text(),
+    birthDate: temporalPlainDate('birth_date'),
+    studyStyle: studyStyleEnum(),
+    accountStatus: accountStatusEnum().default('ONBOARDING_INCOMPLETE').notNull(),
+    guardianEmail: text('guardian_email'),
     totalXp: integer().notNull().default(0),
     themePreference: themePreferenceEnum().default('DARK').notNull(),
     pushNotifications: boolean().default(true).notNull(),
@@ -43,7 +53,12 @@ export const users = pgTable(
       .defaultNow()
       .$onUpdate(() => new Date()),
   },
-  (t) => [index('leaderboard_idx').on(t.isPrivateProfile, t.totalXp)],
+  (t) => [
+    index('leaderboard_idx').on(t.isPrivateProfile, t.totalXp),
+    index('pending_consent_idx')
+      .on(t.accountStatus)
+      .where(sql`${t.accountStatus} = 'PENDING_GUARDIAN_CONSENT'`),
+  ],
 );
 
 export const sessions = pgTable('sessions', {
@@ -98,17 +113,8 @@ export const verifications = pgTable('verifications', {
 // ==========================================
 // DOMÍNIO: GAMIFICAÇÃO & TAREFAS
 // ==========================================
-export const taskCategoryEnum = pgEnum('task_category', [
-  'STUDY',
-  'WORK',
-  'HEALTH',
-  'REST',
-]);
-export const taskDifficultyEnum = pgEnum('task_difficulty', [
-  'EASY',
-  'MEDIUM',
-  'HARD',
-]);
+export const taskCategoryEnum = pgEnum('task_category', ['STUDY', 'WORK', 'HEALTH', 'REST']);
+export const taskDifficultyEnum = pgEnum('task_difficulty', ['EASY', 'MEDIUM', 'HARD']);
 export type TaskCategory = (typeof taskCategoryEnum.enumValues)[number];
 export type TaskDifficulty = (typeof taskDifficultyEnum.enumValues)[number];
 
@@ -140,17 +146,8 @@ export const tasks = pgTable(
 // ==========================================
 // DOMÍNIO: BIOMETRIA & PRONTIDÃO
 // ==========================================
-export const moodEnum = pgEnum('mood', [
-  'EXCITED',
-  'NEUTRAL',
-  'TIRED',
-  'STRESSED',
-]);
-export const readinessModeEnum = pgEnum('readiness_mode', [
-  'HIGH_FOCUS',
-  'LIGHT',
-  'RECOVERY',
-]);
+export const moodEnum = pgEnum('mood', ['EXCITED', 'NEUTRAL', 'TIRED', 'STRESSED']);
+export const readinessModeEnum = pgEnum('readiness_mode', ['HIGH_FOCUS', 'LIGHT', 'RECOVERY']);
 export type ReadinessMode = (typeof readinessModeEnum.enumValues)[number];
 export type Mood = (typeof moodEnum.enumValues)[number];
 
@@ -226,11 +223,7 @@ export const heartRateLogs = pgTable(
 // ==========================================
 // DOMÍNIO: INFRAESTRUTURA IoT (Station/Wearable)
 // ==========================================
-export const deviceStatusEnum = pgEnum('device_status', [
-  'PROVISIONED',
-  'ACTIVE',
-  'REVOKED',
-]);
+export const deviceStatusEnum = pgEnum('device_status', ['PROVISIONED', 'ACTIVE', 'REVOKED']);
 export type DeviceStatus = (typeof deviceStatusEnum.enumValues)[number];
 
 export const iotDevices = pgTable(

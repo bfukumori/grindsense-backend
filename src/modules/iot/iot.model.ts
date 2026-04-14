@@ -17,9 +17,7 @@ export const IotModel = new Elysia({ name: 'model:iot' }).model({
   }),
   'Iot.TelemetryBody': t.Object({
     bpm: t.Number({ error: 'Frequência cardíaca (BPM) deve ser um número.' }),
-    spo2: t.Optional(
-      t.Number({ error: 'Saturação (SpO2) deve ser um número.' }),
-    ),
+    spo2: t.Optional(t.Number({ error: 'Saturação (SpO2) deve ser um número.' })),
     timestamp: t.Number({ error: 'O timestamp da leitura é obrigatório.' }),
   }),
 });

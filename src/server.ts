@@ -32,22 +32,15 @@ const app = new Elysia({ name: APP_CONFIG.serviceName })
       name: 'health-aggregation',
       pattern: Patterns.everyMinutes(15),
       async run() {
-        console.log(
-          '🚀 Worker de Agregação HealthMetrics iniciado (15m interval)',
-        );
+        console.log('🚀 Worker de Agregação HealthMetrics iniciado (15m interval)');
         try {
           await aggregateHealthMetrics();
         } catch (error) {
-          console.error(
-            '❌ [Cron: HealthAggregation] Critical failure:',
-            error,
-          );
+          console.error('❌ [Cron: HealthAggregation] Critical failure:', error);
         }
       },
     }),
   )
   .listen({ port: env.PORT, idleTimeout: 10 });
 
-console.log(
-  `🦊 GrindSense is running at ${app.server?.hostname}:${app.server?.port}`,
-);
+console.log(`🦊 GrindSense is running at ${app.server?.hostname}:${app.server?.port}`);

@@ -1,11 +1,19 @@
-import { desc, eq } from 'drizzle-orm';
+import { Temporal } from '@js-temporal/polyfill';
+import { desc, eq, sql } from 'drizzle-orm';
 import type { Database } from '@/db';
 import { redis } from '@/db/redis';
-import { hourlyHealthMetrics, type ThemePreference, users } from '@/db/schema';
+import {
+  hourlyHealthMetrics,
+  type StudyStyle,
+  type ThemePreference,
+  tasks,
+  users,
+} from '@/db/schema';
 import { AppError } from '@/utils/app-error';
+import { resolveOnboardingCompliance } from './compliance.engine';
 
 const LEADERBOARD_CACHE_KEY = 'leaderboard:top10';
-const CACHE_TTL_SECONDS = 60;
+export const CACHE_TTL_SECONDS = 60;
 
 export class ProfileService {
   constructor(private readonly db: Database) {}
@@ -22,15 +30,11 @@ export class ProfileService {
       throw new AppError(400, 'Nenhum dado fornecido para atualização.');
     }
 
-    const [user] = await this.db
-      .update(users)
-      .set(data)
-      .where(eq(users.id, userId))
-      .returning({
-        themePreference: users.themePreference,
-        pushNotifications: users.pushNotifications,
-        isPrivateProfile: users.isPrivateProfile,
-      });
+    const [user] = await this.db.update(users).set(data).where(eq(users.id, userId)).returning({
+      themePreference: users.themePreference,
+      pushNotifications: users.pushNotifications,
+      isPrivateProfile: users.isPrivateProfile,
+    });
 
     if (!user) throw new AppError(404, 'Usuário não encontrado.');
     return user;
@@ -68,12 +72,7 @@ export class ProfileService {
         totalXp: u.totalXp,
       }));
 
-      await redis.set(
-        LEADERBOARD_CACHE_KEY,
-        JSON.stringify(result),
-        'EX',
-        CACHE_TTL_SECONDS,
-      );
+      await redis.set(LEADERBOARD_CACHE_KEY, JSON.stringify(result), 'EX', CACHE_TTL_SECONDS);
       return result;
     } catch (e) {
       console.log(e);
@@ -93,5 +92,96 @@ export class ProfileService {
       .where(eq(hourlyHealthMetrics.userId, userId))
       .orderBy(desc(hourlyHealthMetrics.bucketHour))
       .limit(24);
+  }
+
+  async completeOnboarding(
+    userId: string,
+    data: {
+      name: string;
+      birthDate: string;
+      studyStyle: StudyStyle;
+      guardianEmail?: string;
+    },
+  ) {
+    const { accountStatus, birthDate, isMinor } = resolveOnboardingCompliance({
+      birthDateString: data.birthDate,
+      guardianEmail: data.guardianEmail,
+    });
+
+    return await this.db.transaction(async (tx) => {
+      const [user] = await tx
+        .update(users)
+        .set({
+          name: data.name,
+          birthDate,
+          studyStyle: data.studyStyle,
+          guardianEmail: isMinor ? data.guardianEmail : null,
+          accountStatus,
+          totalXp: sql`${users.totalXp} + 10`,
+        })
+        .where(eq(users.id, userId))
+        .returning({
+          accountStatus: users.accountStatus,
+          totalXp: users.totalXp,
+        });
+
+      if (!user) throw new AppError(404, 'Usuário não encontrado.');
+
+      const targetDate = Temporal.Now.plainDateISO();
+
+      type TaskInsert = typeof tasks.$inferInsert;
+      const newTasks: TaskInsert[] = [
+        {
+          userId,
+          title: 'Fazer o primeiro check-in',
+          category: 'HEALTH',
+          difficulty: 'EASY',
+          targetDate,
+          xpReward: 10,
+        },
+        {
+          userId,
+          title: 'Explorar o dashboard',
+          category: 'STUDY',
+          difficulty: 'EASY',
+          targetDate,
+          xpReward: 5,
+        },
+      ];
+      await tx.insert(tasks).values(newTasks);
+
+      return {
+        accountStatus: user.accountStatus,
+        isMinor,
+        totalXp: user.totalXp,
+      };
+    });
+  }
+
+  async getMyProfile(userId: string) {
+    const [user] = await this.db
+      .select({
+        id: users.id,
+        name: users.name,
+        email: users.email,
+        image: users.image,
+        totalXp: users.totalXp,
+        studyStyle: users.studyStyle,
+        accountStatus: users.accountStatus,
+        themePreference: users.themePreference,
+        pushNotifications: users.pushNotifications,
+        isPrivateProfile: users.isPrivateProfile,
+        createdAt: users.createdAt,
+      })
+      .from(users)
+      .where(eq(users.id, userId))
+      .limit(1);
+
+    if (!user) throw new AppError(404, 'Usuário não encontrado.');
+
+    return {
+      ...user,
+      createdAt: user.createdAt.toISOString(),
+    };
   }
 }
